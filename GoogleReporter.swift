@@ -45,6 +45,10 @@ public class GoogleReporter {
     /// Determines if stdout log from network requests are supressed.
     /// Default is true.
     public var quietMode = true
+
+    ///	Specifies if app should use IDFV (`UIDevice.current.identifierForVendor`), instead of generating its own UUID.
+    ///	Default is false
+    public var usesVendorIdentifier = false
     
     private static let baseURL = URL(string: "https://www.google-analytics.com/")!
     private static let identifierKey = "co.kristian.GoogleReporter.uniqueUserIdentifier"
@@ -68,9 +72,23 @@ public class GoogleReporter {
     /// - Parameter parameters: A dictionary of additional parameters for the event.
     public func screenView(_ name: String, parameters: [String: String] = [:]) {
         let data = parameters.combinedWith(["cd": name])
-        send("screenView", parameters: data)
+        send(type: "screenView", parameters: data)
     }
-    
+
+    /// Tracks a session start to Google Analytics by setting the `sc`
+    /// parameter of the request. The `dp` parameter is set to the name
+    /// of the application.
+    ///
+    /// - Parameter start: true indicate session started, false - session finished.
+    public func session(start: Bool, parameters: [String: String] = [:]) {
+        let data = parameters.combinedWith([
+            "sc": start ? "start" : "end",
+            "dp": appName,
+        ])
+
+        send(type: nil, parameters: data)
+    }
+
     /// Tracks an event to Google Analytics.
     ///
     /// - Parameter category: The category of the event (ec).
@@ -85,7 +103,7 @@ public class GoogleReporter {
             "el": label
         ])
         
-        send("event", parameters: data)
+        send(type: "event", parameters: data)
     }
     
     /// Tracks an exception event to Google Analytics.
@@ -100,17 +118,17 @@ public class GoogleReporter {
             "exf": String(isFatal)
         ])
         
-        send("exception", parameters: data)
+        send(type: "exception", parameters: data)
     }
     
-    private func send(_ type:  String, parameters: [String: String]) {
+    private func send(type:  String?, parameters: [String: String]) {
         guard let trackerId = trackerId else {
             print("GoogleReporter event ignored.")
             print("You must set your tracker ID UA-XXXXX-XX with GoogleReporter.configure()")
             return
         }
-        
-        let queryArguments: [String: String] = [
+
+        var queryArguments: [String: String] = [
             "tid": trackerId,
             "aid": appIdentifier,
             "cid": uniqueUserIdentifier,
@@ -119,9 +137,12 @@ public class GoogleReporter {
             "ua": userAgent,
             "ul": userLanguage,
             "sr": screenResolution,
-            "v": "1",
-            "t": type
+            "v": "1"
         ]
+        
+        if let type = type, !type.isEmpty {
+            queryArguments.updateValue(type, forKey: "t")
+        }
         
         let arguments = queryArguments.combinedWith(parameters)
         guard let url = GoogleReporter.generateUrl(with: arguments) else {
@@ -164,6 +185,12 @@ public class GoogleReporter {
     }
     
     private lazy var uniqueUserIdentifier: String = {
+        #if os(iOS) || os(tvOS) || os(watchOS)
+        if let identifier = UIDevice.current.identifierForVendor?.uuidString, self.usesVendorIdentifier {
+            return identifier
+        }
+        #endif
+
         let defaults = UserDefaults.standard
         guard let identifier = defaults.string(forKey: GoogleReporter.identifierKey) else {
             let identifier = UUID().uuidString
